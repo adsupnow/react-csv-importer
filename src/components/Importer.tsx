@@ -1,95 +1,41 @@
-import React, { useMemo, useState, useEffect, useContext } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 
 import { BaseRow } from '../parser';
 import { FileStep, FileStepState } from './file-step/FileStep';
 import { generatePreviewColumns } from './fields-step/ColumnPreview';
-import { FieldsStep, Field, FieldsStepState } from './fields-step/FieldsStep';
+import { FieldsStep, FieldsStepState } from './fields-step/FieldsStep';
 import { ProgressDisplay } from './ProgressDisplay';
-import {
-  ImporterFilePreview,
-  ImporterProps,
-  ImporterFieldProps
-} from './ImporterProps';
+import { ImporterFilePreview, ImporterProps } from './ImporterProps';
+
+// re-export from a central spot
+export { ImporterField } from './ImporterField';
+import { useFieldDefinitions } from './ImporterField';
 
 import './Importer.scss';
 import { LocaleContext } from '../locale/LocaleContext';
 import { enUS } from '../locale';
 
-// internal context for registering field definitions
-type FieldDef = Field & { id: number };
-type FieldListSetter = (prev: FieldDef[]) => FieldDef[];
+export function Importer<Row extends BaseRow>(
+  props: ImporterProps<Row>
+): React.ReactElement {
+  const {
+    dataHandler,
+    processChunk,
+    defaultNoHeader,
+    assumeNoHeaders,
+    restartable,
+    displayFieldRowSize,
+    displayColumnPageSize,
+    onStart,
+    onComplete,
+    onClose,
+    children: content,
+    locale: userLocale,
+    ...customPapaParseConfig
+  } = props;
 
-const FieldDefinitionContext = React.createContext<
-  ((setter: FieldListSetter) => void) | null
->(null);
-
-let fieldIdCount = 0;
-
-// defines a field to be filled from file column during import
-export const ImporterField: React.FC<ImporterFieldProps> = ({
-  name,
-  label,
-  optional
-}) => {
-  // @todo this is not SSR-compatible
-  const fieldId = useMemo(() => (fieldIdCount += 1), []);
-  const fieldSetter = useContext(FieldDefinitionContext);
-
-  // update central list as needed
-  useEffect(() => {
-    if (!fieldSetter) {
-      console.error('importer field must be a child of importer'); // @todo
-      return;
-    }
-
-    fieldSetter((prev) => {
-      const newField = { id: fieldId, name, label, isOptional: !!optional };
-
-      const copy = [...prev];
-      const existingIndex = copy.findIndex((item) => item.name === name);
-
-      // preserve existing array position if possible
-      // @todo keep both copies in a map to deal with dynamic fields better
-      if (existingIndex === -1) {
-        copy.push(newField);
-      } else {
-        copy[existingIndex] = newField;
-      }
-
-      return copy;
-    });
-  }, [fieldId, fieldSetter, name, label, optional]);
-
-  // on component unmount, remove this field from list by ID
-  useEffect(() => {
-    if (!fieldSetter) {
-      console.error('importer field must be a child of importer'); // @todo
-      return;
-    }
-
-    return () => {
-      fieldSetter((prev) => {
-        return prev.filter((field) => field.id !== fieldId);
-      });
-    };
-  }, [fieldId, fieldSetter]);
-
-  return null;
-};
-
-export function Importer<Row extends BaseRow>({
-  assumeNoHeaders,
-  restartable,
-  processChunk,
-  onStart,
-  onComplete,
-  onClose,
-  children: content,
-  locale,
-  ...customPapaParseConfig
-}: ImporterProps<Row>): React.ReactElement {
   // helper to combine our displayed content and the user code that provides field definitions
-  const [fields, setFields] = useState<FieldDef[]>([]);
+  const [fields, userFieldContentWrapper] = useFieldDefinitions();
 
   const [fileState, setFileState] = useState<FileStepState | null>(null);
   const [fileAccepted, setFileAccepted] = useState<boolean>(false);
@@ -121,23 +67,8 @@ export function Importer<Row extends BaseRow>({
     );
   }, [fileState]);
 
-  // render provided child content that defines the fields
-  const contentNodes = useMemo(() => {
-    return typeof content === 'function'
-      ? content({
-          file: fileState && fileState.file,
-          preview: externalPreview
-        })
-      : content;
-  }, [fileState, externalPreview, content]);
-  const contentWrap = (
-    <FieldDefinitionContext.Provider value={setFields}>
-      {contentNodes}
-    </FieldDefinitionContext.Provider>
-  );
-
-  // fall back to enUS if no default locale provided
-  locale = locale ?? enUS;
+  // fall back to enUS if no locale provided
+  const locale = userLocale ?? enUS;
 
   if (!fileAccepted || fileState === null || externalPreview === null) {
     return (
@@ -145,7 +76,7 @@ export function Importer<Row extends BaseRow>({
         <div className="CSVImporter_Importer">
           <FileStep
             customConfig={customPapaParseConfig}
-            assumeNoHeaders={assumeNoHeaders}
+            defaultNoHeader={defaultNoHeader ?? assumeNoHeaders}
             prevState={fileState}
             onChange={(parsedPreview) => {
               setFileState(parsedPreview);
@@ -154,8 +85,6 @@ export function Importer<Row extends BaseRow>({
               setFileAccepted(true);
             }}
           />
-
-          {contentWrap}
         </div>
       </LocaleContext.Provider>
     );
@@ -169,6 +98,8 @@ export function Importer<Row extends BaseRow>({
             fileState={fileState}
             fields={fields}
             prevState={fieldsState}
+            displayFieldRowSize={displayFieldRowSize}
+            displayColumnPageSize={displayColumnPageSize}
             onChange={(state) => {
               setFieldsState(state);
             }}
@@ -181,7 +112,15 @@ export function Importer<Row extends BaseRow>({
             }}
           />
 
-          {contentWrap}
+          {userFieldContentWrapper(
+            // render the provided child content that defines the fields
+            typeof content === 'function'
+              ? content({
+                  file: fileState && fileState.file,
+                  preview: externalPreview
+                })
+              : content
+          )}
         </div>
       </LocaleContext.Provider>
     );
@@ -194,7 +133,8 @@ export function Importer<Row extends BaseRow>({
           fileState={fileState}
           fieldsState={fieldsState}
           externalPreview={externalPreview}
-          processChunk={processChunk}
+          // @todo remove assertion after upgrading to TS 4.1+
+          dataHandler={dataHandler ?? processChunk!} // eslint-disable-line @typescript-eslint/no-non-null-assertion
           onStart={onStart}
           onRestart={
             restartable
@@ -210,8 +150,6 @@ export function Importer<Row extends BaseRow>({
           onComplete={onComplete}
           onClose={onClose}
         />
-
-        {contentWrap}
       </div>
     </LocaleContext.Provider>
   );

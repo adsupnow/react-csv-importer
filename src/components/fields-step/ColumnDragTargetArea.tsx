@@ -3,9 +3,10 @@ import { useDrag } from '@use-gesture/react';
 
 import { FieldAssignmentMap } from '../../parser';
 import { Column } from './ColumnPreview';
-import { DragState, Field } from './ColumnDragState';
+import { DragState } from './ColumnDragState';
 import { ColumnDragCard } from './ColumnDragCard';
 import { IconButton } from '../IconButton';
+import { Field } from '../ImporterField';
 
 export type FieldTouchedMap = { [name: string]: boolean | undefined };
 
@@ -13,8 +14,9 @@ import './ColumnDragTargetArea.scss';
 import { useLocale } from '../../locale/LocaleContext';
 
 const TargetBox: React.FC<{
-  hasHeaders: boolean; // for correct display of dummy card
   field: Field;
+  hasHeaders: boolean; // for correct display of dummy card
+  flexBasis?: string; // style override
   touched?: boolean;
   assignedColumn: Column | null;
   dragState: DragState | null;
@@ -26,8 +28,9 @@ const TargetBox: React.FC<{
   onAssign: (fieldName: string) => void;
   onUnassign: (column: Column) => void;
 }> = ({
-  hasHeaders,
   field,
+  hasHeaders,
+  flexBasis,
   touched,
   assignedColumn,
   dragState,
@@ -99,6 +102,7 @@ const TargetBox: React.FC<{
           : l10n.getDragTargetRequiredCaption(field.label)
       }
       ref={containerRef}
+      style={{ flexBasis }}
       onPointerEnter={() => onHover(field.name, true)}
       onPointerLeave={() => onHover(field.name, false)}
     >
@@ -153,6 +157,7 @@ export const ColumnDragTargetArea: React.FC<{
   hasHeaders: boolean; // for correct display of dummy card
   fields: Field[];
   columns: Column[];
+  fieldRowSize?: number;
   fieldTouched: FieldTouchedMap;
   fieldAssignments: FieldAssignmentMap;
   dragState: DragState | null;
@@ -168,6 +173,7 @@ export const ColumnDragTargetArea: React.FC<{
   hasHeaders,
   fields,
   columns,
+  fieldRowSize,
   fieldTouched,
   fieldAssignments,
   dragState,
@@ -177,6 +183,9 @@ export const ColumnDragTargetArea: React.FC<{
   onUnassign
 }) => {
   const l10n = useLocale('fieldsStep');
+
+  // override flex basis for unusual situations
+  const flexBasis = fieldRowSize ? `${100 / fieldRowSize}%` : undefined;
 
   return (
     <section
@@ -190,6 +199,7 @@ export const ColumnDragTargetArea: React.FC<{
           <TargetBox
             key={field.name}
             field={field}
+            flexBasis={flexBasis}
             touched={fieldTouched[field.name]}
             hasHeaders={hasHeaders}
             assignedColumn={
